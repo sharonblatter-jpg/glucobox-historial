@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GlucoBox - Historial Glucémico</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💉</text></svg>">
+<!-- Gráfico con Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root {
+    --azul: #0b5ed7;
+    --azul-oscuro: #084298;
+    --verde: #198754;
+    --rojo: #b00020;
+    --rojo-suave: #ffe0e0;
+    --gris-fondo: #f0f4f8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: var(--gris-fondo);
+    margin: 0; padding: 20px; color: #212529;
+  }
+  header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; }
+  .logo {
+    width: 55px; height: 55px; background: var(--azul); border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; box-shadow: 0 4px 10px rgba(11,94,215,0.35);
+  }
+  h1 { margin: 0; color: var(--azul); font-size: 26px; }
+  .subtitulo { margin: 0; color: #6c757d; font-size: 14px; }
+
+  .panel {
+    background: white; padding: 18px 22px; border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08); margin-bottom: 20px;
+  }
+  .barra-botones { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button {
+    background: var(--azul); color: white; border: none; padding: 10px 18px;
+    border-radius: 9px; cursor: pointer; font-size: 15px; font-weight: 600;
+    transition: background 0.2s;
+  }
+  button:hover:not(:disabled) { background: var(--azul-oscuro); }
+  button:disabled { background: #adb5bd; cursor: not-allowed; }
+  button.secundario { background: #6c757d; }
+  button.secundario:hover:not(:disabled) { background: #495057; }
+  button.peligro { background: #dc3545; }
+  button.peligro:hover:not(:disabled) { background: #a71d2a; }
+
+  #estado {
+    font-weight: bold; padding: 6px 12px; border-radius: 20px;
+    background: #e9ecef; font-size: 14px;
+  }
+  #estado.conectado { background: #d1e7dd; color: var(--verde); }
+  #estado.error     { background: #f8d7da; color: var(--rojo); }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .kpi { background: #f8f9fa; border-left: 5px solid var(--azul); padding: 12px 14px; border-radius: 8px; }
+  .kpi .valor { font-size: 22px; font-weight: bold; color: var(--azul-oscuro); }
+  .kpi .etiqueta { font-size: 12px; color: #6c757d; text-transform: uppercase; }
+
+  .contenedor-tabla { max-height: 300px; overflow-y: auto; border-radius: 8px; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 9px 8px; border-bottom: 1px solid #e9ecef; text-align: center; }
+  th { background: var(--azul); color: white; position: sticky; top: 0; }
+  tbody tr:nth-child(even) { background: #f8f9fa; }
+  tbody tr.alerta { background: var(--rojo-suave) !important; color: var(--rojo); font-weight: 600; }
+  .badge-ok { color: var(--verde); font-weight: 700; }
+  .badge-mal { color: var(--rojo); font-weight: 700; }
+
+  h2 { font-size: 18px; color: var(--azul-oscuro); margin: 0 0 6px; }
+  .vacio { text-align: center; color: #adb5bd; padding: 20px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">💉</div>
+  <div>
+    <h1>GlucoBox</h1>
+    <p class="subtitulo">Asistente portátil de gestión de insulina — Historial Glucémico</p>
+  </div>
+</header>
+
+<div class="panel">
+  <div class="barra-botones">
+    <button id="btnConectar">🔌 Conectar GlucoBox</button>
+    <button id="btnDesconectar" class="secundario" disabled>⏏️ Desconectar</button>
+    <button id="btnLimpiar" class="peligro">🗑️ Limpiar historial</button>
+    <button id="btnCSV" class="secundario">💾 Exportar CSV</button>
+    <span id="estado">Desconectado</span>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="kpis">
+    <div class="kpi"><div class="valor" id="kpiRegistros">0</div><div class="etiqueta">Dosis Registradas</div></div>
+    <div class="kpi" style="border-left-color:#dc3545"><div class="valor" id="kpiAlarmas" style="color:#b02a37">0</div><div class="etiqueta">Alarmas de Temp</div></div>
+    <div class="kpi"><div class="valor" id="kpiGlucemia">—</div><div class="etiqueta">Última Glucemia</div></div>
+    <div class="kpi"><div class="valor" id="kpiDosis">—</div><div class="etiqueta">Última Dosis (UI)</div></div>
+    <div class="kpi"><div class="valor" id="kpiZona">—</div><div class="etiqueta">Última Zona</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>📈 Glucemia en el tiempo</h2>
+  <canvas id="grafico" height="100"></canvas>
+</div>
+
+<div class="panel">
+  <h2>📋 Historial de Eventos</h2>
+  <div class="contenedor-tabla">
+    <table id="tablaHistorial">
+      <thead>
+        <tr>
+          <th>#</th><th>Hora</th><th>Tipo</th><th>Glucemia</th><th>CHO</th>
+          <th>Dosis</th><th>Zona</th><th>Temp (°C)</th><th>Estado</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="vacio" id="mensajeVacio">Aún no hay registros. Conecta el GlucoBox.</div>
+  </div>
+</div>
+
+<script>
+let puerto = null;
+let lector = null;
+let contador = 0;
+const registros = [];
+
+const btnConectar    = document.getElementById('btnConectar');
+const btnDesconectar = document.getElementById('btnDesconectar');
+const btnLimpiar     = document.getElementById('btnLimpiar');
+const btnCSV         = document.getElementById('btnCSV');
+const estado         = document.getElementById('estado');
+const cuerpoTabla    = document.querySelector('#tablaHistorial tbody');
+const mensajeVacio   = document.getElementById('mensajeVacio');
+
+// Configurar Gráfico
+const ctx = document.getElementById('grafico').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Glucemia (mg/dL)',
+      data: [],
+      borderColor: '#0b5ed7',
+      backgroundColor: 'rgba(11,94,215,0.12)',
+      tension: 0.3, fill: true, pointRadius: 4
+    }, {
+      label: 'Límite mínimo (70)',
+      data: [],
+      borderColor: '#dc3545',
+      borderDash: [6, 6], pointRadius: 0, fill: false
+    }]
+  },
+  options: { responsive: true, scales: { y: { suggestedMin: 50, suggestedMax: 300 } }, plugins: { legend: { position: 'bottom' } } }
+});
+
+btnConectar.addEventListener('click', async () => {
+  if (!('serial' in navigator)) {
+    alert('Tu navegador no soporta Web Serial.\nUsa Chrome, Edge u Opera.');
+    return;
+  }
+  try {
+    puerto = await navigator.serial.requestPort();
+    await puerto.open({ baudRate: 9600 });
+    estado.textContent = '✅ GlucoBox conectado';
+    estado.className = 'conectado';
+    btnConectar.disabled = true;
+    btnDesconectar.disabled = false;
+    leerDatos();
+  } catch (e) {
+    console.error(e);
+    estado.textContent = '❌ Error al conectar';
+    estado.className = 'error';
+  }
+});
+
+btnDesconectar.addEventListener('click', async () => {
+  try {
+    if (lector) { await lector.cancel(); lector = null; }
+    if (puerto) { await puerto.close(); puerto = null; }
+  } catch (e) { console.warn(e); }
+  estado.textContent = 'Desconectado';
+  estado.className = '';
+  btnConectar.disabled = false;
+  btnDesconectar.disabled = true;
+});
+
+btnLimpiar.addEventListener('click', () => {
+  if (!confirm('¿Borrar todo el historial mostrado?')) return;
+  cuerpoTabla.innerHTML = '';
+  registros.length = 0;
+  contador = 0;
+  chart.data.labels = [];
+  chart.data.datasets[0].data = [];
+  chart.data.datasets[1].data = [];
+  chart.update();
+  actualizarKPIs();
+  mensajeVacio.style.display = 'block';
+});
+
+async function leerDatos() {
+  const decoder = new TextDecoderStream();
+  puerto.readable.pipeTo(decoder.writable);
+  lector = decoder.readable.getReader();
+
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await lector.read();
+      if (done) break;
+      buffer += value;
+      const lineas = buffer.split('\n');
+      buffer = lineas.pop();
+      lineas.forEach(l => {
+        l = l.trim();
+        if (l.length > 0) procesarLinea(l);
+      });
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') console.error(e);
+  }
+}
+
+function procesarLinea(linea) {
+  try {
+    const partes = {};
+    linea.split(',').forEach(p => {
+      const idx = p.indexOf(':');
+      if (idx > 0) partes[p.slice(0,idx).trim()] = p.slice(idx+1).trim();
+    });
+
+    const hora = new Date().toLocaleTimeString('es-AR');
+    contador++;
+    const fila = document.createElement('tr');
+
+    // ============ CASO 1: ALARMA DE TEMPERATURA ============
+    if (linea.startsWith('ALARMA:')) {
+      const esRecuperacion = linea.startsWith('ALARMA:TEMP_OK');
+      const temp = parseFloat(partes.T);
+      
+      fila.className = esRecuperacion ? '' : 'alerta';
+      const tipoTxt = esRecuperacion ? '✅ Temp OK' : '🌡️ Alarma Temp';
+      const detalleTxt = esRecuperacion ? `Volvió a rango (Dur: ${partes.DUR || '?'})` : `Fuera de rango: ${temp}°C`;
+
+      fila.innerHTML = `
+        <td>${contador}</td><td>${hora}</td>
+        <td><span class="badge-mal">ALARMA</span></td>
+        <td colspan="4">${detalleTxt}</td>
+        <td>${isNaN(temp) ? '—' : temp}</td>
+        <td>${tipoTxt}</td>
+      `;
+      
+      registros.push({ hora, tipo: 'ALARMA', detalle: detalleTxt, temp });
+      
+      chart.data.labels.push(hora);
+      chart.data.datasets[0].data.push(null); // No afecta la glucemia
+      chart.data.datasets[1].data.push(null);
+      chart.update();
+    } 
+    // ============ CASO 2: DOSIS NORMAL ============
+    else {
+      const glucemia = parseFloat(partes.G);
+      const cho      = parseFloat(partes.CHO);
+      const dosis    = parseFloat(partes.D);
+      const zona     = (partes.Z || '—').toUpperCase();
+      const temp     = parseFloat(partes.T);
+
+      const alertaGlu  = !isNaN(glucemia) && (glucemia < 70 || glucemia > 250);
+      const alertaTemp = !isNaN(temp) && (temp < 2 || temp > 30);
+
+      if (alertaGlu || alertaTemp) fila.className = 'alerta';
+
+      let estadoTxt = '<span class="badge-ok">✔ OK</span>';
+      if (alertaTemp && alertaGlu) estadoTxt = '<span class="badge-mal">⚠️ Temp + Glucemia</span>';
+      else if (alertaTemp)         estadoTxt = '<span class="badge-mal">🌡️ Temp fuera de rango</span>';
+      else if (alertaGlu)          estadoTxt = '<span class="badge-mal">🩸 Glucemia crítica</span>';
+
+      fila.innerHTML = `
+        <td>${contador}</td><td>${hora}</td><td><span class="badge-ok">DOSIS</span></td>
+        <td>${isNaN(glucemia) ? '—' : glucemia}</td>
+        <td>${isNaN(cho) ? '—' : cho}</td>
+        <td>${isNaN(dosis) ? '—' : dosis.toFixed(1)}</td>
+        <td>${zona}</td>
+        <td>${isNaN(temp) ? '—' : temp}</td>
+        <td>${estadoTxt}</td>
+      `;
+
+      registros.push({ hora, tipo: 'DOSIS', glucemia, cho, dosis, zona, temp });
+
+      if (!isNaN(glucemia)) {
+        chart.data.labels.push(hora);
+        chart.data.datasets[0].data.push(glucemia);
+        chart.data.datasets[1].data.push(70); // Línea límite
+        if (chart.data.labels.length > 30) {
+          chart.data.labels.shift();
+          chart.data.datasets[0].data.shift();
+          chart.data.datasets[1].data.shift();
+        }
+        chart.update();
+      }
+    }
+
+    cuerpoTabla.prepend(fila);
+    mensajeVacio.style.display = 'none';
+    actualizarKPIs();
+
+  } catch (e) { console.warn('Error parseando línea:', linea); }
+}
+
+function actualizarKPIs() {
+  const dosisRegistradas = registros.filter(r => r.tipo === 'DOSIS');
+  const alarmas = registros.filter(r => r.tipo === 'ALARMA');
+  
+  document.getElementById('kpiRegistros').textContent = dosisRegistradas.length;
+  document.getElementById('kpiAlarmas').textContent = alarmas.length;
+  
+  const ult = dosisRegistradas[dosisRegistradas.length - 1];
+  if (!ult) {
+    ['kpiGlucemia','kpiDosis','kpiZona'].forEach(id => document.getElementById(id).textContent = '—');
+    return;
+  }
+  document.getElementById('kpiGlucemia').textContent = isNaN(ult.glucemia) ? '—' : ult.glucemia;
+  document.getElementById('kpiDosis').textContent = isNaN(ult.dosis) ? '—' : ult.dosis.toFixed(1);
+  document.getElementById('kpiZona').textContent = ult.zona || '—';
+}
+
+btnCSV.addEventListener('click', () => {
+  if (registros.length === 0) { alert('No hay registros.'); return; }
+  const cab = 'N,Hora,Tipo,Glucemia,CHO,Dosis,Zona,Temp,Detalle\n';
+  const filas = registros.map((r,i) => {
+    if (r.tipo === 'ALARMA') return [i+1, r.hora, 'ALARMA', '', '', '', '', r.temp, r.detalle].join(',');
+    return [i+1, r.hora, 'DOSIS', r.glucemia, r.cho, r.dosis, r.zona, r.temp, ''].join(',');
+  }).join('\n');
+  
+  const blob = new Blob([cab + filas], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `GlucoBox_Historial_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+});
+</script>
+</body>
+</html>
